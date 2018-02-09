@@ -42,6 +42,8 @@ DEALINGS IN THE SOFTWARE.  */
 #include "htslib/thread_pool.h"
 #include "sam_opts.h"
 #include "htslib/khash.h"
+#include "cram/sam_header.h"
+#include "cram/cram_samtools.h"
 
 #define DEF_CLEVEL 1
 
@@ -213,7 +215,7 @@ static int bamshuf(const char *fn, int n_files, const char *pre, int clevel,
         fprintf(stderr, "Couldn't read header for '%s'\n", fn);
         goto fail;
     }
-
+/*
     if (sam_hdr_change_HD(h, "SO", "unsorted") != 0) {
         print_error("collate",
                     "failed to change sort order header to 'unsorted'\n");
@@ -224,6 +226,43 @@ static int bamshuf(const char *fn, int n_files, const char *pre, int clevel,
                     "failed to change group order header to 'query'\n");
         goto fail;
     }
+*/
+
+    SAM_hdr *sh = bam_header_to_cram(h);
+    if (!sh) {
+        fprintf(stderr, "Couldn't convert to CRAM header.\n");
+        goto fail;
+    }
+    //sam_hdr_dump(sh);
+
+    SAM_hdr_type *sht = sam_hdr_find(sh, "HD", NULL, NULL); 
+    if (!sht) {
+        if (sam_hdr_add(sh, "HD", "VN", SAM_FORMAT_VERSION, NULL)) {
+            fprintf(stderr, "Couldn't generate the HD line.\n");
+            goto fail;
+        }
+        sht = sam_hdr_find(sh, "HD", NULL, NULL);
+    }
+    //sam_hdr_dump(sh);
+
+    if (sam_hdr_update(sh, sht, "SO", "unsorted", NULL)) {
+        fprintf(stderr, "Couldn't change the SO value.\n");
+        goto fail;
+    }     
+    if (sam_hdr_update(sh, sht, "GO", "query", NULL)) {
+        fprintf(stderr, "Couldn't change the GO value.\n");
+        goto fail;
+    }
+
+    bam_hdr_destroy(h);
+    sam_hdr_rebuild(sh);
+    //sam_hdr_dump(sh);
+    h = cram_header_to_bam(sh);
+    if (!h) {
+        fprintf(stderr, "Couldn't convert to BAM header.\n");
+        goto fail;
+    }
+    sam_hdr_free(sh);
 
     // open final output file
     l = strlen(pre);

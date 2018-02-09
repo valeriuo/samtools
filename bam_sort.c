@@ -46,6 +46,8 @@ DEALINGS IN THE SOFTWARE.  */
 #include "htslib/sam.h"
 #include "sam_opts.h"
 #include "samtools.h"
+#include "cram/sam_header.h"
+#include "cram/cram_samtools.h"
 
 
 // Struct which contains the a record, and the pointer to the sort tag (if any) or
@@ -2161,7 +2163,7 @@ int bam_sort_core_ext(int is_by_qname, char* sort_by_tag, const char *fn, const 
         new_so = "queryname";
     else
         new_so = "coordinate";
-
+/*
     if (sam_hdr_change_HD(header, "SO", new_so) != 0) {
         print_error("sort",
                     "failed to change sort order header to '%s'\n", new_so);
@@ -2172,6 +2174,40 @@ int bam_sort_core_ext(int is_by_qname, char* sort_by_tag, const char *fn, const 
                     "failed to delete group order header\n");
         goto err;
     }
+*/
+
+    SAM_hdr *sh = bam_header_to_cram(header);
+    if (!sh) {
+        fprintf(stderr, "Couldn't convert to CRAM header.\n");
+        goto err;
+    }
+    //sam_hdr_dump(sh);
+
+    SAM_hdr_type *sht = sam_hdr_find(sh, "HD", NULL, NULL);
+    if (!sht) {
+        if (sam_hdr_add(sh, "HD", "VN", SAM_FORMAT_VERSION, NULL)) {
+            fprintf(stderr, "Couldn't generate the HD line.\n");
+            goto err;
+        }
+        sht = sam_hdr_find(sh, "HD", NULL, NULL);
+    }
+    //sam_hdr_dump(sh);
+
+    if (sam_hdr_update(sh, sht, "SO", new_so, NULL)) {
+        fprintf(stderr, "Couldn't change the SO value.\n");
+        goto err;
+    }
+    sam_hdr_remove_key(sh, sht, "GO");
+
+    bam_hdr_destroy(header);
+    sam_hdr_rebuild(sh);
+    //sam_hdr_dump(sh);
+    header = cram_header_to_bam(sh);
+    if (!header) {
+        fprintf(stderr, "Couldn't convert to BAM header.\n");
+        goto err;
+    }
+    sam_hdr_free(sh);
 
     // No gain to using the thread pool here as the flow of this code
     // is such that we are *either* reading *or* sorting.  Hence a shared
