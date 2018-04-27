@@ -1166,6 +1166,7 @@ void output_stats(FILE *to, stats_t *stats, int sparse)
     fprintf(to, "SN\toutward oriented pairs:\t%ld\n", (long)nisize_outward);
     fprintf(to, "SN\tpairs with other orientation:\t%ld\n", (long)nisize_other);
     fprintf(to, "SN\tpairs on different chromosomes:\t%ld\n", (long)stats->nreads_anomalous/2);
+    fprintf(to, "SN\tpercentage of properly paired(\%):\t%d\n", (stats->nreads_1st+stats->nreads_2nd)? 100*stats->nreads_properly_paired/(stats->nreads_1st+stats->nreads_2nd):0);
 
     int ibase,iqual;
     if ( stats->max_len<stats->nbases ) stats->max_len++;
