@@ -934,9 +934,10 @@ void collect_stats(bam1_t *bam_line, stats_t *stats)
         // Count the whole read
         for (i=0; i<bam_line->core.n_cigar; i++)
         {
-            if ( bam_cigar_op(bam_get_cigar(bam_line)[i])==BAM_CMATCH || bam_cigar_op(bam_get_cigar(bam_line)[i])==BAM_CINS )
+            int cig  = bam_cigar_op(bam_get_cigar(bam_line)[i]);
+            if ( cig==BAM_CMATCH || cig==BAM_CINS || cig==BAM_CEQUAL || cig==BAM_CDIFF )
                 stats->nbases_mapped_cigar += bam_cigar_oplen(bam_get_cigar(bam_line)[i]);
-            if ( bam_cigar_op(bam_get_cigar(bam_line)[i])==BAM_CDEL )
+            if ( cig==BAM_CDEL )
                 readlen += bam_cigar_oplen(bam_get_cigar(bam_line)[i]);
         }
     }
@@ -1166,7 +1167,7 @@ void output_stats(FILE *to, stats_t *stats, int sparse)
     fprintf(to, "SN\toutward oriented pairs:\t%ld\n", (long)nisize_outward);
     fprintf(to, "SN\tpairs with other orientation:\t%ld\n", (long)nisize_other);
     fprintf(to, "SN\tpairs on different chromosomes:\t%ld\n", (long)stats->nreads_anomalous/2);
-    fprintf(to, "SN\tpercentage of properly paired(\%):\t%d\n", (stats->nreads_1st+stats->nreads_2nd)? 100*stats->nreads_properly_paired/(stats->nreads_1st+stats->nreads_2nd):0);
+    fprintf(to, "SN\tpercentage of properly paired(%%):\t%d\n", (int)((stats->nreads_1st+stats->nreads_2nd)? 100*stats->nreads_properly_paired/(stats->nreads_1st+stats->nreads_2nd):0));
 
     int ibase,iqual;
     if ( stats->max_len<stats->nbases ) stats->max_len++;
