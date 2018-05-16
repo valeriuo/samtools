@@ -63,6 +63,7 @@ DEALINGS IN THE SOFTWARE.  */
 #include "bedidx.h"
 
 #define BWA_MIN_RDLEN 35
+#define DEFAULT_CHUNK_NO 8
 // From the spec
 // If 0x4 is set, no assumptions can be made about RNAME, POS, CIGAR, MAPQ, bits 0x2, 0x10, 0x100 and 0x800, and the bit 0x20 of the previous read in the template.
 #define IS_PAIRED_AND_MAPPED(bam) (((bam)->core.flag&BAM_FPAIRED) && !((bam)->core.flag&BAM_FUNMAP) && !((bam)->core.flag&BAM_FMUNMAP))
@@ -135,6 +136,7 @@ typedef struct
     // Misc
     char *split_tag;      // Tag on which to perform stats splitting
     char *split_prefix;   // Path or string prefix for filenames created when splitting
+    int remove_overlaps;
 }
 stats_info_t;
 
@@ -225,6 +227,14 @@ typedef struct
 }
 stats_t;
 KHASH_MAP_INIT_STR(c2stats, stats_t*)
+
+typedef struct {
+    uint32_t first;     // 1 first, 0 second
+    uint32_t n, m;      // number of chunks, allocated chunks
+    pos_t *chunks;      // chunk array of size m
+} pair_t;
+KHASH_MAP_INIT_STR(qn2pair, pair_t*)
+
 
 static void error(const char *format, ...);
 int is_in_regions(bam1_t *bam_line, stats_t *stats);
@@ -787,7 +797,117 @@ void collect_orig_read_stats(bam1_t *bam_line, stats_t *stats, int* gc_count_out
     *gc_count_out = gc_count;
 }
 
-void collect_stats(bam1_t *bam_line, stats_t *stats)
+static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stats_t *stats, int pmin, int pmax) {
+    if ( !bam_line || !read_pairs || !stats)
+        return;
+
+    if ( !(bam_line->core.flag & BAM_FPAIRED) || abs(bam_line->core.isize) >= 2*bam_line->core.l_qseq ) {
+        round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
+        return;
+    }
+
+    uint32_t first = IS_READ1(bam_line);
+    char *qname = bam_get_qname(bam_line);
+    khint_t k = kh_get(qn2pair, read_pairs, qname);
+    if ( k == kh_end(read_pairs) ) { //first chunk from this template
+        if ( pmin == -1 && pmax == -1 )
+            return;
+
+        int ret;
+        char *s = strdup(qname);
+        if ( !s ) {
+            fprintf(stderr, "Error allocating memory\n");
+            return;
+        }
+        k = kh_put(qn2pair, read_pairs, s, &ret);
+        if ( -1 == ret ) {
+            fprintf(stderr, "Error when inserting read %s in pair hash table\n", s);
+            free(s);
+            return;
+        }
+
+        pair_t *pc = calloc(1, sizeof(pair_t));
+        if ( !pc ) {
+            fprintf(stderr, "Error allocating memory\n");
+            return;
+        }
+        pc->m = DEFAULT_CHUNK_NO;
+        pc->chunks = calloc(pc->m, sizeof(pos_t));
+        if ( !pc->chunks ) {
+            fprintf(stderr, "Error allocating memory\n");
+            return;
+        }
+        pc->chunks[0].from = pmin;
+        pc->chunks[0].to = pmax;
+        pc->n = 1;
+        pc->first = first;
+
+        kh_val(read_pairs, k) = pc;
+        round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
+    } else { //no the first chunk
+        pair_t *pc = kh_val(read_pairs, k);
+        if ( !pc ) {
+            fprintf(stderr, "Invalid hash table entry\n");
+            return;
+        }
+
+        if ( first == pc->first ) { //chunk from an existing line
+            if ( pmin == -1 && pmax == -1 )
+                return;
+
+            if ( pc->n == pc->m ) {
+                pos_t *tmp = realloc(pc->chunks, pc->m<<1);
+                if ( !tmp ) {
+                    fprintf(stderr, "Error allocating memory\n");
+                    return;
+                }
+                pc->chunks = tmp;
+            }
+            pc->m<<=1;
+            pc->chunks[pc->n].from = pmin;
+            pc->chunks[pc->n].to = pmax;
+            pc->n++;
+        } else { // the other line, check for overlapping
+            if ( pmin == -1 && pmax == -1) { //delete entry
+                free(pc->chunks);
+                kh_del(qn2pair, read_pairs, k);
+            }
+
+            int i;
+            for (i=0; i<pc->n; i++) {
+                if ( pc->chunks[i].from > pmin ) {
+                    if ( pc->chunks[i].from < pmax )
+                        round_buffer_insert_read(&(stats->cov_rbuf), pmin, pc->chunks[i].from-1);
+                    if ( pc->chunks[i].to < pmax ) {
+                        if ( (i+1) < pc->n && pc->chunks[i+1].from < pmax ) {
+                            round_buffer_insert_read(&(stats->cov_rbuf), pc->chunks[i].to, pc->chunks[i+1].from-1);
+                            pmin = pc->chunks[i+1].from;
+                        } else {
+                            round_buffer_insert_read(&(stats->cov_rbuf), pc->chunks[i].to, pmax-1);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void cleanup_overlaps(khash_t(qn2pair) *read_pairs) {
+    if ( !read_pairs )
+        return;
+
+    khint_t k;
+    for (k = kh_begin(read_pairs); k < kh_end(read_pairs); k++) {
+        if ( kh_exist(read_pairs, k)) {
+            pair_t * pc = kh_val(read_pairs, k);
+            free(pc->chunks);
+            kh_del(qn2pair, read_pairs, k);
+        }
+    }
+}
+
+void collect_stats(bam1_t *bam_line, stats_t *stats, khash_t(qn2pair) *read_pairs)
 {
     if ( stats->rg_hash )
     {
@@ -1009,8 +1129,12 @@ void collect_stats(bam1_t *bam_line, stats_t *stats)
                 case BAM_CDIFF:
                     pmin = MAX(p, stats->chunks[i].from-1);
                     pmax = MIN(p+oplen, stats->chunks[i].to);
-                    if ( pmax >= pmin )
-                        round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
+                    if ( pmax >= pmin ) {
+                        if ( stats->info->remove_overlaps )
+                            remove_overlaps(bam_line, read_pairs, stats, pmin, pmax);
+                        else
+                            round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
+                    }
                     break;
                 case BAM_CDEL:
                     break;
@@ -1026,6 +1150,7 @@ void collect_stats(bam1_t *bam_line, stats_t *stats)
                     p = pnew;
                 }
             }
+            remove_overlaps(bam_line, read_pairs, stats, -1, -1); //remove the line from the hash table
         } else {
             uint32_t p = bam_line->core.pos, j;
             for (j = 0; j < bam_line->core.n_cigar; j++) {
@@ -1035,7 +1160,10 @@ void collect_stats(bam1_t *bam_line, stats_t *stats)
                 case BAM_CMATCH:
                 case BAM_CEQUAL:
                 case BAM_CDIFF:
-                    round_buffer_insert_read(&(stats->cov_rbuf), p, p+oplen-1);
+                    if ( stats->info->remove_overlaps )
+                        remove_overlaps(bam_line, read_pairs, stats, p, p+oplen);
+                    else
+                        round_buffer_insert_read(&(stats->cov_rbuf), p, p+oplen-1);
                     break;
                 case BAM_CDEL:
                     break;
@@ -1697,6 +1825,7 @@ stats_info_t* stats_info_init(int argc, char *argv[])
     info->filter_readlen = -1;
     info->argc = argc;
     info->argv = argv;
+    info->remove_overlaps = 0;
 
     return info;
 }
@@ -1841,11 +1970,12 @@ int main_stats(int argc, char *argv[])
         {"sparse", no_argument, NULL, 'x'},
         {"split", required_argument, NULL, 'S'},
         {"split-prefix", required_argument, NULL, 'P'},
+        {"remove-overlaps", no_argument, NULL, 'p'},
         {NULL, 0, NULL, 0}
     };
     int opt;
 
-    while ( (opt=getopt_long(argc,argv,"?hdsxr:c:l:i:t:m:q:f:F:I:1:S:P:@:",loptions,NULL))>0 )
+    while ( (opt=getopt_long(argc,argv,"?hdsxpr:c:l:i:t:m:q:f:F:I:1:S:P:@:",loptions,NULL))>0 )
     {
         switch (opt)
         {
@@ -1870,6 +2000,7 @@ int main_stats(int argc, char *argv[])
             case 'x': sparse = 1; break;
             case 'S': info->split_tag = optarg; break;
             case 'P': info->split_prefix = optarg; break;
+            case 'p': info->remove_overlaps = 1; break;
             case '?':
             case 'h': error(NULL);
             default:
@@ -1902,6 +2033,8 @@ int main_stats(int argc, char *argv[])
     // .. hash
     khash_t(c2stats)* split_hash = kh_init(c2stats);
 
+    khash_t(qn2pair)* read_pairs = kh_init(qn2pair);
+
     // Collect statistics
     bam1_t *bam_line = bam_init1();
     if ( optind<argc )
@@ -1932,9 +2065,9 @@ int main_stats(int argc, char *argv[])
                             while (sam_itr_multi_next(info->sam, iter, bam_line) >= 0) {
                                if (info->split_tag) {
                                    curr_stats = get_curr_split_stats(bam_line, split_hash, info, targets);
-                                   collect_stats(bam_line, curr_stats);
+                                   collect_stats(bam_line, curr_stats, read_pairs);
                                }
-                               collect_stats(bam_line, all_stats);
+                               collect_stats(bam_line, all_stats, read_pairs);
                             }
                         }
 
@@ -1964,9 +2097,9 @@ int main_stats(int argc, char *argv[])
         while ((ret = sam_read1(info->sam, info->sam_header, bam_line)) >= 0) {
             if (info->split_tag) {
                 curr_stats = get_curr_split_stats(bam_line, split_hash, info, targets);
-                collect_stats(bam_line, curr_stats);
+                collect_stats(bam_line, curr_stats, read_pairs);
             }
-            collect_stats(bam_line, all_stats);
+            collect_stats(bam_line, all_stats, read_pairs);
         }
 
         if (ret < -1) {
@@ -1987,6 +2120,7 @@ int main_stats(int argc, char *argv[])
     cleanup_stats(all_stats);
     cleanup_stats_info(info);
     destroy_split_stats(split_hash);
+    cleanup_overlaps(read_pairs);
 
     return 0;
 }
