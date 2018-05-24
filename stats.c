@@ -797,7 +797,7 @@ void collect_orig_read_stats(bam1_t *bam_line, stats_t *stats, int* gc_count_out
     *gc_count_out = gc_count;
 }
 
-void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stats_t *stats, int pmin, int pmax) {
+static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stats_t *stats, int pmin, int pmax) {
     if ( !bam_line || !read_pairs || !stats )
         return;
 
@@ -853,7 +853,7 @@ void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stats_t *st
 
         kh_val(read_pairs, k) = pc;
         round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
-    } else { //not the first line
+    } else { //template already present
         pair_t *pc = kh_val(read_pairs, k);
         if ( !pc ) {
             fprintf(stderr, "Invalid hash table entry\n");
@@ -878,7 +878,7 @@ void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stats_t *st
             pc->chunks[pc->n].to = pmax;
             pc->n++;
         } else { // the other line, check for overlapping
-            if ( pmin == -1 && kh_exist(read_pairs, k) ) { //delete entry
+            if ( pmin == -1 && kh_exist(read_pairs, k) ) { //job done, delete entry
                 char *key = (char *)kh_key(read_pairs, k);
                 pair_t *val = kh_val(read_pairs, k);
                 free(val->chunks);
@@ -893,18 +893,21 @@ void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stats_t *st
                 if ( pmin >= pc->chunks[i].to )
                     continue;
                 
-                if ( pmax <= pc->chunks[i].from ) { //no overlap
-                    round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
-                    return;
+                if ( pmax <= pc->chunks[i].from ) //no overlap
+                    break;
+
+                if ( pmin < pc->chunks[i].from ) {
+                    round_buffer_insert_read(&(stats->cov_rbuf), pmin, pc->chunks[i].from-1);
+                    pmin = pc->chunks[i].from;
                 }
 
-                if ( pmin < pc->chunks[i].from )
-                    round_buffer_insert_read(&(stats->cov_rbuf), pmin, pc->chunks[i].from-1);
-
-                if ( pmax <= pc->chunks[i].to ) //completely contained
+                if ( pmax <= pc->chunks[i].to ) { //completely contained
+                    stats->nbases_mapped_cigar -= (pmax - pmin);
                     return; 
-                else                            //overlaps at the beginning, so move pmin
+                } else {                           //overlaps at the beginning, so move pmin
+                    stats->nbases_mapped_cigar -= (pc->chunks[i].to - pmin);
                     pmin = pc->chunks[i].to;
+                }
             }
             round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
         }
