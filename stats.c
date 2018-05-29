@@ -802,8 +802,9 @@ static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stat
         return;
 
     uint32_t first = (IS_READ1(bam_line) > 0 ? 1 : 0) + (IS_READ2(bam_line) > 0 ? 2 : 0) ;
-    if ( !(bam_line->core.flag & BAM_FPAIRED) || 
-         abs(bam_line->core.isize) >= 2*bam_line->core.l_qseq || 
+    if ( !(bam_line->core.flag & BAM_FPAIRED) ||
+         (bam_line->core.flag & BAM_FMUNMAP) ||
+         (abs(bam_line->core.isize) >= 2*bam_line->core.l_qseq) || 
          (first != 1 && first != 2) ) {
         if ( pmin >= 0 )
             round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
@@ -853,7 +854,6 @@ static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stat
         pc->first = first;
 
         kh_val(read_pairs, k) = pc;
-        round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
     } else { //template already present
         pair_t *pc = kh_val(read_pairs, k);
         if ( !pc ) {
@@ -912,9 +912,9 @@ static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stat
                     pmin = pc->chunks[i].to;
                 }
             }
-            round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
         }
     }
+    round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
 }
 
 static void cleanup_overlaps(khash_t(qn2pair) *read_pairs) {
@@ -1756,6 +1756,7 @@ static void error(const char *format, ...)
         printf("    -S, --split <tag>                   Also write statistics to separate files split by tagged field.\n");
         printf("    -t, --target-regions <file>         Do stats in these regions only. Tab-delimited file chr,from,to, 1-based, inclusive.\n");
         printf("    -x, --sparse                        Suppress outputting IS rows where there are no insertions.\n");
+        printf("    -p, --remove-overlaps               Remove overlaps of paired-end reads from coverage and base count computations.\n");
         sam_global_opt_help(stdout, "-.--.@");
         printf("\n");
     }
