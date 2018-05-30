@@ -64,6 +64,7 @@ DEALINGS IN THE SOFTWARE.  */
 
 #define BWA_MIN_RDLEN 35
 #define DEFAULT_CHUNK_NO 8
+#define DEFAULT_PAIR_MAX 1000
 // From the spec
 // If 0x4 is set, no assumptions can be made about RNAME, POS, CIGAR, MAPQ, bits 0x2, 0x10, 0x100 and 0x800, and the bit 0x20 of the previous read in the template.
 #define IS_PAIRED_AND_MAPPED(bam) (((bam)->core.flag&BAM_FPAIRED) && !((bam)->core.flag&BAM_FUNMAP) && !((bam)->core.flag&BAM_FMUNMAP))
@@ -224,6 +225,7 @@ typedef struct
     pos_t *chunks;
     uint32_t nchunks;
 
+    uint32_t pair_count;
 }
 stats_t;
 KHASH_MAP_INIT_STR(c2stats, stats_t*)
@@ -797,6 +799,37 @@ void collect_orig_read_stats(bam1_t *bam_line, stats_t *stats, int* gc_count_out
     *gc_count_out = gc_count;
 }
 
+static int cleanup_overlaps(khash_t(qn2pair) *read_pairs, int max) {
+    if ( !read_pairs )
+        return;
+
+    int count = 0;
+    khint_t k;
+    for (k = kh_begin(read_pairs); k < kh_end(read_pairs); k++) {
+        if ( kh_exist(read_pairs, k) ) {
+            char *key = (char *)kh_key(read_pairs, k);
+            pair_t *val = kh_val(read_pairs, k);
+            if ( val && val->chunks ) {
+                if ( val->chunks[val->n-1].to < max ) {
+                    free(val->chunks);
+                    free(val);
+                    free(key);
+                    kh_del(qn2pair, read_pairs, k);
+                    count++;
+                }
+            } else {
+                free(key);
+                kh_del(qn2pair, read_pairs, k);
+                count++;
+            }
+        }
+    }
+    if ( max == INT_MAX )
+        kh_destroy(qn2pair, read_pairs);
+
+    return count;
+}
+
 static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stats_t *stats, int pmin, int pmax) {
     if ( !bam_line || !read_pairs || !stats )
         return;
@@ -815,6 +848,11 @@ static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stat
     if ( !qname ) {
         fprintf(stderr, "Error retrieving qname for line starting at pos %d\n", bam_line->core.pos);
         return;
+    }
+
+    //cleanup the pair hash table to free memory
+    if ( stats->pair_count > DEFAULT_PAIR_MAX ) {
+        stats->pair_count -= cleanup_overlaps(read_pairs, bam_line->core.pos);
     }
 
     khint_t k = kh_get(qn2pair, read_pairs, qname);
@@ -854,6 +892,7 @@ static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stat
         pc->first = first;
 
         kh_val(read_pairs, k) = pc;
+        stats->pair_count++;
     } else { //template already present
         pair_t *pc = kh_val(read_pairs, k);
         if ( !pc ) {
@@ -888,6 +927,7 @@ static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stat
                 }
                 free(key);
                 kh_del(qn2pair, read_pairs, k);
+                stats->pair_count--;
                 return;
             }
 
@@ -907,7 +947,7 @@ static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stat
                 if ( pmax <= pc->chunks[i].to ) { //completely contained
                     stats->nbases_mapped_cigar -= (pmax - pmin);
                     return; 
-                } else {                           //overlaps at the end
+                } else {                           //overlap at the end
                     stats->nbases_mapped_cigar -= (pc->chunks[i].to - pmin);
                     pmin = pc->chunks[i].to;
                 }
@@ -915,26 +955,6 @@ static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stat
         }
     }
     round_buffer_insert_read(&(stats->cov_rbuf), pmin, pmax-1);
-}
-
-static void cleanup_overlaps(khash_t(qn2pair) *read_pairs) {
-    if ( !read_pairs )
-        return;
-
-    khint_t k;
-    for (k = kh_begin(read_pairs); k < kh_end(read_pairs); k++) {
-        if ( kh_exist(read_pairs, k) ) {
-            char *key = (char *)kh_key(read_pairs, k);
-            pair_t *val = kh_val(read_pairs, k);
-            if ( val ) {
-                free(val->chunks);
-                free(val);
-            }
-            free(key);
-            kh_del(qn2pair, read_pairs, k);
-        }
-    }
-    kh_destroy(qn2pair, read_pairs);
 }
 
 void collect_stats(bam1_t *bam_line, stats_t *stats, khash_t(qn2pair) *read_pairs)
@@ -1892,6 +1912,7 @@ stats_t* stats_init()
     stats->nindels = stats->nbases;
     stats->split_name = NULL;
     stats->nchunks = 0;
+    stats->pair_count = 0;
 
     return stats;
 }
@@ -2152,7 +2173,7 @@ int main_stats(int argc, char *argv[])
     cleanup_stats(all_stats);
     cleanup_stats_info(info);
     destroy_split_stats(split_hash);
-    cleanup_overlaps(read_pairs);
+    cleanup_overlaps(read_pairs, INT_MAX);
 
     return 0;
 }
