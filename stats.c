@@ -801,7 +801,7 @@ void collect_orig_read_stats(bam1_t *bam_line, stats_t *stats, int* gc_count_out
 
 static int cleanup_overlaps(khash_t(qn2pair) *read_pairs, int max) {
     if ( !read_pairs )
-        return;
+        return 0;
 
     int count = 0;
     khint_t k;
@@ -1346,7 +1346,7 @@ void output_stats(FILE *to, stats_t *stats, int sparse)
     fprintf(to, "SN\toutward oriented pairs:\t%ld\n", (long)nisize_outward);
     fprintf(to, "SN\tpairs with other orientation:\t%ld\n", (long)nisize_other);
     fprintf(to, "SN\tpairs on different chromosomes:\t%ld\n", (long)stats->nreads_anomalous/2);
-    fprintf(to, "SN\tpercentage of properly paired(%%):\t%d\n", (int)((stats->nreads_1st+stats->nreads_2nd)? 100*stats->nreads_properly_paired/(stats->nreads_1st+stats->nreads_2nd):0));
+    fprintf(to, "SN\tpercentage of properly paired(%%):\t%.1f\n", (stats->nreads_1st+stats->nreads_2nd)? (float)(100*stats->nreads_properly_paired)/(stats->nreads_1st+stats->nreads_2nd):0);
 
     int ibase,iqual;
     if ( stats->max_len<stats->nbases ) stats->max_len++;
