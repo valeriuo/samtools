@@ -64,7 +64,7 @@ DEALINGS IN THE SOFTWARE.  */
 
 #define BWA_MIN_RDLEN 35
 #define DEFAULT_CHUNK_NO 8
-#define DEFAULT_PAIR_MAX 1000
+#define DEFAULT_PAIR_MAX 10000
 // From the spec
 // If 0x4 is set, no assumptions can be made about RNAME, POS, CIGAR, MAPQ, bits 0x2, 0x10, 0x100 and 0x800, and the bit 0x20 of the previous read in the template.
 #define IS_PAIRED_AND_MAPPED(bam) (((bam)->core.flag&BAM_FPAIRED) && !((bam)->core.flag&BAM_FUNMAP) && !((bam)->core.flag&BAM_FMUNMAP))
@@ -225,7 +225,8 @@ typedef struct
     pos_t *chunks;
     uint32_t nchunks;
 
-    uint32_t pair_count;
+    uint32_t pair_count;          // Number of active pairs in the pairing hash table
+    uint32_t target_count;        // Number of bases covered by the target file
 }
 stats_t;
 KHASH_MAP_INIT_STR(c2stats, stats_t*)
@@ -1257,7 +1258,7 @@ void output_stats(FILE *to, stats_t *stats, int sparse)
 {
     // Calculate average insert size and standard deviation (from the main bulk data only)
     int isize, ibulk=0;
-    uint64_t nisize=0, nisize_inward=0, nisize_outward=0, nisize_other=0;
+    uint64_t nisize=0, nisize_inward=0, nisize_outward=0, nisize_other=0, cov15=0;
     double bulk=0, avg_isize=0, sd_isize=0;
     for (isize=0; isize<stats->isize->nitems(stats->isize->data); isize++)
     {
@@ -1291,6 +1292,9 @@ void output_stats(FILE *to, stats_t *stats, int sparse)
         sd_isize += (stats->isize->inward(stats->isize->data, isize) + stats->isize->outward(stats->isize->data, isize) +stats->isize->other(stats->isize->data, isize)) * (isize-avg_isize)*(isize-avg_isize) / (nisize ? nisize : 1);
     sd_isize = sqrt(sd_isize);
 
+    int icov;
+    for (icov=16; icov<stats->ncov; icov++)
+        cov15 += stats->cov[icov];
 
     fprintf(to, "# This file was produced by samtools stats (%s+htslib-%s) and can be plotted using plot-bamstats\n", samtools_version(), hts_version());
     if( stats->split_name != NULL ){
@@ -1347,6 +1351,9 @@ void output_stats(FILE *to, stats_t *stats, int sparse)
     fprintf(to, "SN\tpairs with other orientation:\t%ld\n", (long)nisize_other);
     fprintf(to, "SN\tpairs on different chromosomes:\t%ld\n", (long)stats->nreads_anomalous/2);
     fprintf(to, "SN\tpercentage of properly paired(%%):\t%.1f\n", (stats->nreads_1st+stats->nreads_2nd)? (float)(100*stats->nreads_properly_paired)/(stats->nreads_1st+stats->nreads_2nd):0);
+    fprintf(to, "SN\tbases inside the target:\t%u\n", stats->target_count);
+    if ( stats->target_count )
+        fprintf(to, "SN\tpercentage of target genome with coverage larger than 15 (%%):\t%.2f\n", (float)(100*cov15)/stats->target_count);
 
     int ibase,iqual;
     if ( stats->max_len<stats->nbases ) stats->max_len++;
@@ -1506,7 +1513,6 @@ void output_stats(FILE *to, stats_t *stats, int sparse)
     fprintf(to, "# Coverage distribution. Use `grep ^COV | cut -f 2-` to extract this part.\n");
     if  ( stats->cov[0] )
         fprintf(to, "COV\t[<%d]\t%d\t%ld\n",stats->info->cov_min,stats->info->cov_min-1, (long)stats->cov[0]);
-    int icov;
     for (icov=1; icov<stats->ncov-1; icov++)
         if ( stats->cov[icov] )
             fprintf(to, "COV\t[%d-%d]\t%d\t%ld\n",stats->info->cov_min + (icov-1)*stats->info->cov_step, stats->info->cov_min + icov*stats->info->cov_step-1,stats->info->cov_min + icov*stats->info->cov_step-1, (long)stats->cov[icov]);
@@ -1607,6 +1613,8 @@ void init_regions(stats_t *stats, const char *file)
     if ( !stats->regions ) error("Unable to map the -t sequences to the BAM sequences.\n");
     fclose(fp);
 
+    //stats->target_count = 0; // reset to 0 and count the file coverage
+
     // sort region intervals and remove duplicates
     for (r = 0; r < stats->nregions; r++) {
         regions_t *reg = &stats->regions[r];
@@ -1620,6 +1628,8 @@ void init_regions(stats_t *stats, const char *file)
             }
             reg->npos = ++new_p;
         }
+        for (p = 0; p < reg->npos; p++)
+            stats->target_count += (reg->pos[p].to - reg->pos[p].from);
     }
 
     stats->chunks = calloc(stats->nchunks, sizeof(pos_t));
@@ -1714,6 +1724,8 @@ int replicate_regions(stats_t *stats, hts_itr_multi_t *iter) {
         for (j = 0; j < stats->regions[tid].npos; j++) {
             stats->regions[tid].pos[j].from = iter->reg_list[i].intervals[j].beg+1;
             stats->regions[tid].pos[j].to = iter->reg_list[i].intervals[j].end;
+
+            stats->target_count += (stats->regions[tid].pos[j].to - stats->regions[tid].pos[j].from);
         }
     }
  
@@ -1913,6 +1925,7 @@ stats_t* stats_init()
     stats->split_name = NULL;
     stats->nchunks = 0;
     stats->pair_count = 0;
+    stats->target_count = 0; //2948647747;
 
     return stats;
 }

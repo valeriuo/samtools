@@ -40,6 +40,8 @@ SN	outward oriented pairs:	0
 SN	pairs with other orientation:	0
 SN	pairs on different chromosomes:	0
 SN	percentage of properly paired(%):	100.0
+SN	bases inside the target:	165
+SN	percentage of target genome with coverage larger than 15 (%):	0.00
 # First Fragment Qualities. Use `grep ^FFQ | cut -f 2-` to extract this part.
 # Columns correspond to qualities and rows to cycles. First column is the cycle number.
 FFQ	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	1	0	0	0	0	0	0	0	0	0	0	0
