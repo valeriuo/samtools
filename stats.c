@@ -64,7 +64,7 @@ DEALINGS IN THE SOFTWARE.  */
 
 #define BWA_MIN_RDLEN 35
 #define DEFAULT_CHUNK_NO 8
-#define DEFAULT_PAIR_MAX 10000
+#define DEFAULT_PAIR_MAX UINT32_MAX
 // From the spec
 // If 0x4 is set, no assumptions can be made about RNAME, POS, CIGAR, MAPQ, bits 0x2, 0x10, 0x100 and 0x800, and the bit 0x20 of the previous read in the template.
 #define IS_PAIRED_AND_MAPPED(bam) (((bam)->core.flag&BAM_FPAIRED) && !((bam)->core.flag&BAM_FUNMAP) && !((bam)->core.flag&BAM_FMUNMAP))
@@ -138,6 +138,7 @@ typedef struct
     char *split_tag;      // Tag on which to perform stats splitting
     char *split_prefix;   // Path or string prefix for filenames created when splitting
     int remove_overlaps;
+    int cov_threshold;
 }
 stats_info_t;
 
@@ -1257,8 +1258,8 @@ float gcd_percentile(gc_depth_t *gcd, int N, int p)
 void output_stats(FILE *to, stats_t *stats, int sparse)
 {
     // Calculate average insert size and standard deviation (from the main bulk data only)
-    int isize, ibulk=0;
-    uint64_t nisize=0, nisize_inward=0, nisize_outward=0, nisize_other=0, cov15=0;
+    int isize, ibulk=0, icov;
+    uint64_t nisize=0, nisize_inward=0, nisize_outward=0, nisize_other=0, cov_sum=0;
     double bulk=0, avg_isize=0, sd_isize=0;
     for (isize=0; isize<stats->isize->nitems(stats->isize->data); isize++)
     {
@@ -1291,10 +1292,6 @@ void output_stats(FILE *to, stats_t *stats, int sparse)
     for (isize=1; isize<ibulk; isize++)
         sd_isize += (stats->isize->inward(stats->isize->data, isize) + stats->isize->outward(stats->isize->data, isize) +stats->isize->other(stats->isize->data, isize)) * (isize-avg_isize)*(isize-avg_isize) / (nisize ? nisize : 1);
     sd_isize = sqrt(sd_isize);
-
-    int icov;
-    for (icov=16; icov<stats->ncov; icov++)
-        cov15 += stats->cov[icov];
 
     fprintf(to, "# This file was produced by samtools stats (%s+htslib-%s) and can be plotted using plot-bamstats\n", samtools_version(), hts_version());
     if( stats->split_name != NULL ){
@@ -1351,9 +1348,12 @@ void output_stats(FILE *to, stats_t *stats, int sparse)
     fprintf(to, "SN\tpairs with other orientation:\t%ld\n", (long)nisize_other);
     fprintf(to, "SN\tpairs on different chromosomes:\t%ld\n", (long)stats->nreads_anomalous/2);
     fprintf(to, "SN\tpercentage of properly paired(%%):\t%.1f\n", (stats->nreads_1st+stats->nreads_2nd)? (float)(100*stats->nreads_properly_paired)/(stats->nreads_1st+stats->nreads_2nd):0);
-    fprintf(to, "SN\tbases inside the target:\t%u\n", stats->target_count);
-    if ( stats->target_count )
-        fprintf(to, "SN\tpercentage of target genome with coverage larger than 15 (%%):\t%.2f\n", (float)(100*cov15)/stats->target_count);
+    if ( stats->target_count ) {
+        fprintf(to, "SN\tbases inside the target:\t%u\n", stats->target_count);
+        for (icov=stats->info->cov_threshold+1; icov<stats->ncov; icov++)
+            cov_sum += stats->cov[icov];
+        fprintf(to, "SN\tpercentage of target genome with coverage > %d (%%):\t%.2f\n", stats->info->cov_threshold, (float)(100*cov_sum)/stats->target_count);
+    }
 
     int ibase,iqual;
     if ( stats->max_len<stats->nbases ) stats->max_len++;
@@ -1613,8 +1613,6 @@ void init_regions(stats_t *stats, const char *file)
     if ( !stats->regions ) error("Unable to map the -t sequences to the BAM sequences.\n");
     fclose(fp);
 
-    //stats->target_count = 0; // reset to 0 and count the file coverage
-
     // sort region intervals and remove duplicates
     for (r = 0; r < stats->nregions; r++) {
         regions_t *reg = &stats->regions[r];
@@ -1629,7 +1627,7 @@ void init_regions(stats_t *stats, const char *file)
             reg->npos = ++new_p;
         }
         for (p = 0; p < reg->npos; p++)
-            stats->target_count += (reg->pos[p].to - reg->pos[p].from);
+            stats->target_count += (reg->pos[p].to - reg->pos[p].from + 1);
     }
 
     stats->chunks = calloc(stats->nchunks, sizeof(pos_t));
@@ -1725,7 +1723,7 @@ int replicate_regions(stats_t *stats, hts_itr_multi_t *iter) {
             stats->regions[tid].pos[j].from = iter->reg_list[i].intervals[j].beg+1;
             stats->regions[tid].pos[j].to = iter->reg_list[i].intervals[j].end;
 
-            stats->target_count += (stats->regions[tid].pos[j].to - stats->regions[tid].pos[j].from);
+            stats->target_count += (stats->regions[tid].pos[j].to - stats->regions[tid].pos[j].from + 1);
         }
     }
  
@@ -1789,6 +1787,7 @@ static void error(const char *format, ...)
         printf("    -t, --target-regions <file>         Do stats in these regions only. Tab-delimited file chr,from,to, 1-based, inclusive.\n");
         printf("    -x, --sparse                        Suppress outputting IS rows where there are no insertions.\n");
         printf("    -p, --remove-overlaps               Remove overlaps of paired-end reads from coverage and base count computations.\n");
+        printf("    -g, --cov-threshold                 Only bases with coverage above this value will be included in the target percentage computation.\n");
         sam_global_opt_help(stdout, "-.--.@");
         printf("\n");
     }
@@ -1890,6 +1889,7 @@ stats_info_t* stats_info_init(int argc, char *argv[])
     info->argc = argc;
     info->argv = argv;
     info->remove_overlaps = 0;
+    info->cov_threshold = 0;
 
     return info;
 }
@@ -2037,11 +2037,12 @@ int main_stats(int argc, char *argv[])
         {"split", required_argument, NULL, 'S'},
         {"split-prefix", required_argument, NULL, 'P'},
         {"remove-overlaps", no_argument, NULL, 'p'},
+        {"cov-threshold", required_argument, NULL, 'g'},
         {NULL, 0, NULL, 0}
     };
     int opt;
 
-    while ( (opt=getopt_long(argc,argv,"?hdsxpr:c:l:i:t:m:q:f:F:I:1:S:P:@:",loptions,NULL))>0 )
+    while ( (opt=getopt_long(argc,argv,"?hdsxpr:c:l:i:t:m:q:f:F:g:I:1:S:P:@:",loptions,NULL))>0 )
     {
         switch (opt)
         {
@@ -2067,6 +2068,10 @@ int main_stats(int argc, char *argv[])
             case 'S': info->split_tag = optarg; break;
             case 'P': info->split_prefix = optarg; break;
             case 'p': info->remove_overlaps = 1; break;
+            case 'g': info->cov_threshold = atoi(optarg); 
+                      if ( info->cov_threshold < 0 || info->cov_threshold == INT_MAX ) 
+                          error("Unsupported value for coverage threshold %d\n", info->cov_threshold);
+                      break;
             case '?':
             case 'h': error(NULL);
             default:
@@ -2158,6 +2163,11 @@ int main_stats(int argc, char *argv[])
     }
     else
     {
+        if ( info->cov_threshold > 0 && !targets ) {
+            fprintf(stderr, "Coverage percentage calcuation requires a list of target regions\n");
+            goto cleanup;
+        }
+               
         // Stream through the entire BAM ignoring off-target regions if -t is given
         int ret;
         while ((ret = sam_read1(info->sam, info->sam_header, bam_line)) >= 0) {
@@ -2179,6 +2189,7 @@ int main_stats(int argc, char *argv[])
     if (info->split_tag)
         output_split_stats(split_hash, bam_fname, sparse);
 
+cleanup:
     bam_destroy1(bam_line);
     bam_hdr_destroy(info->sam_header);
     sam_global_args_free(&ga);
