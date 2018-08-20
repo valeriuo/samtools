@@ -217,6 +217,9 @@ int cram_reheader_inplace2(cram_fd *fd, const bam_hdr_t *h, const char *arg_list
                                  NULL))
         goto err;
 
+    if (sam_hdr_rebuild(hdr))
+        goto err;
+
     int header_len = sam_hdr_length(hdr);
     /* Fix M5 strings? Maybe out of scope for this tool */
 
@@ -311,6 +314,9 @@ int cram_reheader_inplace3(cram_fd *fd, const bam_hdr_t *h, const char *arg_list
                                  arg_list ? "CL": NULL,
                                  arg_list ? arg_list : NULL,
                                  NULL))
+        goto err;
+
+    if (sam_hdr_rebuild(hdr))
         goto err;
 
     int header_len = sam_hdr_length(hdr);
