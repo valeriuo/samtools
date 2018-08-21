@@ -3,10 +3,10 @@
 @SQ	SN:ref1	LN:45
 @SQ	SN:ref2	LN:40
 @SQ	SN:ref3	LN:4
-@PG	ID:llama
 @RG	ID:fish	PG:llama
 @RG	ID:cow	PU:13_&^&&*(:332	PG:donkey
 @RG	PU:*9u8jkjjkjd:	ID:colt
+@PG	ID:llama
 @PG	ID:bull	PP:donkey
 @PG	ID:donkey
 @CO	Do you know?
