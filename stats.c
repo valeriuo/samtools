@@ -719,7 +719,7 @@ static void collect_barcode_stats(bam1_t* bam_line, stats_t* stats) {
             continue;
 
         char* barcode = bam_aux2Z(bc);
-        if (!barcode)
+        if (!barcode || !strncmp(barcode, "none", 4))
             continue;
 
         uint32_t barcode_len = strlen(barcode);
@@ -750,6 +750,7 @@ static void collect_barcode_stats(bam1_t* bam_line, stats_t* stats) {
         quals = stats->quals_barcode + stats->tags_barcode[tag].offset*stats->nquals;
         maxqual = &stats->tags_barcode[tag].max_qual;
         separator = &stats->tags_barcode[tag].tag_sep;
+        int error_raised = 0;
 
         for (i = 0; i < barcode_len; i++) {
             switch (barcode[i]) {
@@ -770,8 +771,9 @@ static void collect_barcode_stats(bam1_t* bam_line, stats_t* stats) {
                 break;
             default:
                 if (*separator >= 0) {
-                    if (*separator != i) {
-                        fprintf(stderr, "Barcode separator for tag %s is in a different position at sequence '%s'\n", barcode_tag, bam_get_qname(bam_line));
+                    if (*separator != i && !error_raised) {
+                        fprintf(stderr, "Barcode separator for tag %s is in a different position or wrong barcode content('%s') at sequence '%s'\n", barcode_tag, barcode, bam_get_qname(bam_line));
+                        error_raised = 1;
                         continue;
                     }
                 } else {
