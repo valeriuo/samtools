@@ -774,13 +774,20 @@ static void collect_barcode_stats(bam1_t* bam_line, stats_t* stats) {
                     if (*separator != i && !error_raised) {
                         fprintf(stderr, "Barcode separator for tag %s is in a different position or wrong barcode content('%s') at sequence '%s'\n", barcode_tag, barcode, bam_get_qname(bam_line));
                         error_raised = 1;
-                        continue;
                     }
                 } else {
                     *separator = i;
                 }
             }
+
+            /* don't process the rest of the tag bases */
+            if (error_raised)
+                break;
         }
+
+        /* skip to the next tag */
+        if (error_raised)
+            continue;
 
         uint8_t* qt = bam_aux_get(bam_line, qual_tag);
         if (!qt)
