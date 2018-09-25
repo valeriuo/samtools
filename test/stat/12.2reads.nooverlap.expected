@@ -22,6 +22,7 @@ SN	total first fragment length:	100	# ignores clipping
 SN	total last fragment length:	100	# ignores clipping
 SN	bases mapped:	200	# ignores clipping
 SN	bases mapped (cigar):	168	# more accurate
+SN	bases covered:	165
 SN	bases trimmed:	0
 SN	bases duplicated:	0
 SN	mismatches:	6	# from NM fields

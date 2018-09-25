@@ -198,6 +198,7 @@ typedef struct
     uint64_t nreads_mq0;
     uint64_t nbases_mapped;
     uint64_t nbases_mapped_cigar;
+    uint64_t nbases_covered;
     uint64_t nbases_trimmed;  // bwa trimmed bases
     uint64_t nmismatches;
     uint64_t nreads_QCfailed, nreads_secondary;
@@ -1082,9 +1083,11 @@ static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stat
 
                 if ( pmax <= pc->chunks[i].to ) { //completely contained
                     stats->nbases_mapped_cigar -= (pmax - pmin);
+                    stats->nbases_covered -= (pmax - pmin);
                     return;
                 } else {                           //overlap at the end
                     stats->nbases_mapped_cigar -= (pc->chunks[i].to - pmin);
+                    stats->nbases_covered -= (pc->chunks[i].to - pmin);
                     pmin = pc->chunks[i].to;
                 }
             }
@@ -1225,6 +1228,7 @@ void collect_stats(bam1_t *bam_line, stats_t *stats, khash_t(qn2pair) *read_pair
                 else if ( iref+ncig-1 > stats->reg_to ) ncig -= iref+ncig-1 - stats->reg_to;
                 if ( ncig<0 ) ncig = 0;
                 stats->nbases_mapped_cigar += ncig;
+                stats->nbases_covered += ncig;
                 iref += bam_cigar_oplen(bam_get_cigar(bam_line)[i]);
             }
             else if ( cig==BAM_CINS )
@@ -1241,10 +1245,19 @@ void collect_stats(bam1_t *bam_line, stats_t *stats, khash_t(qn2pair) *read_pair
         for (i=0; i<bam_line->core.n_cigar; i++)
         {
             int cig  = bam_cigar_op(bam_get_cigar(bam_line)[i]);
-            if ( cig==BAM_CMATCH || cig==BAM_CINS || cig==BAM_CEQUAL || cig==BAM_CDIFF )
-                stats->nbases_mapped_cigar += bam_cigar_oplen(bam_get_cigar(bam_line)[i]);
-            if ( cig==BAM_CDEL )
-                readlen += bam_cigar_oplen(bam_get_cigar(bam_line)[i]);
+            int ncig = bam_cigar_oplen(bam_get_cigar(bam_line)[i]);
+
+            switch (cig) {
+            case BAM_CDEL:
+                readlen += ncig;
+                break;
+            case BAM_CMATCH:
+            case BAM_CEQUAL:
+            case BAM_CDIFF:
+                stats->nbases_covered += ncig;
+            case BAM_CINS:
+                stats->nbases_mapped_cigar += ncig;
+            }
         }
     }
 
@@ -1477,6 +1490,7 @@ void output_stats(FILE *to, stats_t *stats, int sparse)
     fprintf(to, "SN\ttotal last fragment length:\t%ld\t# ignores clipping\n", (long)stats->total_len_2nd);
     fprintf(to, "SN\tbases mapped:\t%ld\t# ignores clipping\n", (long)stats->nbases_mapped);                 // the length of the whole read goes here, including soft-clips etc.
     fprintf(to, "SN\tbases mapped (cigar):\t%ld\t# more accurate\n", (long)stats->nbases_mapped_cigar);   // only matched and inserted bases are counted here
+    fprintf(to, "SN\tbases covered:\t%ld\n", (long)stats->nbases_covered);
     fprintf(to, "SN\tbases trimmed:\t%ld\n", (long)stats->nbases_trimmed);
     fprintf(to, "SN\tbases duplicated:\t%ld\n", (long)stats->total_len_dup);
     fprintf(to, "SN\tmismatches:\t%ld\t# from NM fields\n", (long)stats->nmismatches);

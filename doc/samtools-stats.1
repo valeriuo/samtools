@@ -163,6 +163,9 @@ but more comprehensive.
 .B bases mapped (cigar)
 - number of mapped bases filtered by the CIGAR string corresponding to the read they belong to. Only alignment matches(M), inserts(I), sequence matches(=) and sequence mismatches(X) are counted.
 
+.B bases covered
+- number of mapped and covered bases. Same as above, but excludes inserts(I).
+
 .B bases trimmed
 - number of bases trimmed by bwa, that belong to non secondary and non supplementary reads. Enabled by -q option.
 
