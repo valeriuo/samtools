@@ -786,20 +786,20 @@ static bool init_state(const bam2fq_opts_t* opts, bam2fq_state_t** state_out)
     int i, j;
     for (i = 0; i < 3; ++i) {
         if (opts->fnr[i]) {
-	    for (j = 0; j < i; j++)
-		if (opts->fnr[j] && strcmp(opts->fnr[j], opts->fnr[i]) == 0)
-		    break;
-	    if (j == i) {
-		state->fpr[i] = open_fqfile(opts->fnr[i], state->compression_level, &state->p);
-		if (state->fpr[i] == NULL) {
-		    print_error_errno("bam2fq", "Cannot write to r%d file \"%s\"",
-				      i, opts->fnr[i]);
-		    free(state);
-		    return false;
-		}
-	    } else {
-		state->fpr[i] = state->fpr[j];
-	    }
+            for (j = 0; j < i; j++)
+                if (opts->fnr[j] && strcmp(opts->fnr[j], opts->fnr[i]) == 0)
+                    break;
+            if (j == i) {
+                state->fpr[i] = open_fqfile(opts->fnr[i], state->compression_level, &state->p);
+                if (state->fpr[i] == NULL) {
+                    print_error_errno("bam2fq", "Cannot write to r%d file \"%s\"",
+                                      i, opts->fnr[i]);
+                    free(state);
+                    return false;
+                }
+            } else {
+                state->fpr[i] = state->fpr[j];
+            }
         } else {
             if (!state->hstdout) {
                 state->hstdout = bgzf_dopen(fileno(stdout), "wu");
@@ -815,25 +815,25 @@ static bool init_state(const bam2fq_opts_t* opts, bam2fq_state_t** state_out)
     for (i = 0; i < 2; i++) {
         state->fpi[i] = NULL;
         if (opts->index_file[i]) {
-	    for (j = 0; j < 3; j++)
-		if (opts->fnr[j] && strcmp(opts->fnr[j], opts->index_file[i]) == 0)
-		    break;
-	    for (j -= 3; j >= 0 && j < i; j++)
-		if (opts->index_file[j] && strcmp(opts->index_file[j], opts->index_file[i]) == 0)
-		    break;
-	    if (i == j) {
-		state->fpi[i] = open_fqfile(opts->index_file[i], state->compression_level, &state->p);
-		if (state->fpi[i] == NULL) {
-		    print_error_errno("bam2fq", "Cannot write to i%d file \"%s\"",
-				      i+1, opts->index_file[i]);
-		    free(state);
-		    return false;
-		}
-	    } else if (j < 0) {
-		state->fpi[i] = state->fpr[j+3];
+            for (j = 0; j < 3; j++)
+                if (opts->fnr[j] && strcmp(opts->fnr[j], opts->index_file[i]) == 0)
+                    break;
+            for (j -= 3; j >= 0 && j < i; j++)
+                if (opts->index_file[j] && strcmp(opts->index_file[j], opts->index_file[i]) == 0)
+                    break;
+            if (i == j) {
+                state->fpi[i] = open_fqfile(opts->index_file[i], state->compression_level, &state->p);
+                if (state->fpi[i] == NULL) {
+                    print_error_errno("bam2fq", "Cannot write to i%d file \"%s\"",
+                                      i+1, opts->index_file[i]);
+                    free(state);
+                    return false;
+                }
+            } else if (j < 0) {
+                state->fpi[i] = state->fpr[j+3];
             } else {
-		state->fpi[i] = state->fpi[j];
-	    }
+                state->fpi[i] = state->fpi[j];
+            }
         }
     }
 
@@ -857,13 +857,13 @@ static bool destroy_state(const bam2fq_opts_t *opts, bam2fq_state_t *state, int*
     int i, j;
     for (i = 0; i < 3; ++i) {
         if (state->fpr[i] != state->hstdout) {
-	    for (j = 0; j < i; j++)
-		if (state->fpr[i] == state->fpr[j])
-		    break;
-	    if (j == i && bgzf_close(state->fpr[i])) {
-		print_error_errno("bam2fq", "Error closing r%d file \"%s\"", i, opts->fnr[i]);
-		valid = false;
-	    }
+            for (j = 0; j < i; j++)
+                if (state->fpr[i] == state->fpr[j])
+                    break;
+            if (j == i && bgzf_close(state->fpr[i])) {
+                print_error_errno("bam2fq", "Error closing r%d file \"%s\"", i, opts->fnr[i]);
+                valid = false;
+            }
         }
     }
     if (state->hstdout) {
@@ -873,12 +873,12 @@ static bool destroy_state(const bam2fq_opts_t *opts, bam2fq_state_t *state, int*
         }
     }
     for (i = 0; i < 2; i++) {
-	for (j = 0; j < 3; j++)
-	    if (state->fpi[i] == state->fpr[j])
-		break;
-	for (j -= 3; j >= 0 && j < i; j++)
-	    if (state->fpi[i] == state->fpi[j])
-		break;
+        for (j = 0; j < 3; j++)
+            if (state->fpi[i] == state->fpr[j])
+                break;
+        for (j -= 3; j >= 0 && j < i; j++)
+            if (state->fpi[i] == state->fpi[j])
+                break;
         if (j == i && state->fpi[i] && bgzf_close(state->fpi[i])) {
             print_error_errno("bam2fq", "Error closing i%d file \"%s\"", i+1, opts->index_file[i]);
             valid = false;
