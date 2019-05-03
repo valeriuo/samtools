@@ -882,7 +882,7 @@ sub test_usage
     foreach my $subcommand (@subcommands) {
 	# Under msys the isatty function fails to recognise the terminal.
 	# Skip these tests for now.
-	next if ($^O =~ /^msys/ && $subcommand =~ /^(dict|sort|stats|view)$/);
+	next if ($^O =~ /^msys/ && $subcommand =~ /^(dict|sort|stats|view|fasta|fastq)$/);
         test_usage_subcommand($opts,%args,subcmd=>$subcommand);
     }
 }

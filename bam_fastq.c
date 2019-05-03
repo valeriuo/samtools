@@ -39,6 +39,7 @@ DEALINGS IN THE SOFTWARE.  */
 #include "htslib/thread_pool.h"
 #include "samtools.h"
 #include "sam_opts.h"
+#include "iscygpty.h"
 
 #define taglist_free(p)
 KLIST_INIT(ktaglist, char*, taglist_free)
@@ -657,7 +658,11 @@ static bool parse_opts(int argc, char *argv[], bam2fq_opts_t** opts_out)
         return false;
     }
 
+#ifdef _WIN32
+    int in_isnt_tty = !is_cygpty(STDIN_FILENO);
+#else
     int in_isnt_tty = !isatty(STDIN_FILENO);
+#endif
     if (in_isnt_tty && argc > optind && strcmp(argv[optind], "-") == 0)
         in_isnt_tty = 0; // as we specified "-" explicitly anyway
 

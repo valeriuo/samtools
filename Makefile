@@ -44,7 +44,7 @@ AOBJS=      bam_index.o bam_plcmd.o sam_view.o bam_fastq.o \
             cut_target.o phase.o bam2depth.o padding.o bedcov.o bamshuf.o \
             faidx.o dict.o stats.o stats_isize.o bam_flags.o bam_split.o \
             bam_tview.o bam_tview_curses.o bam_tview_html.o bam_lpileup.o \
-            bam_quickcheck.o bam_addrprg.o bam_markdup.o tmp_file.o
+            bam_quickcheck.o bam_addrprg.o bam_markdup.o tmp_file.o iscygpty.o
 LZ4OBJS  =  $(LZ4DIR)/lz4.o
 
 prefix      = /usr/local
@@ -201,12 +201,13 @@ sam_header.o: sam_header.c config.h sam_header.h $(htslib_khash_h)
 sam_opts.o: sam_opts.c config.h $(sam_opts_h)
 sam_utils.o: sam_utils.c config.h samtools.h
 sam_view.o: sam_view.c config.h $(htslib_sam_h) $(htslib_faidx_h) $(htslib_khash_h) $(htslib_thread_pool_h samtools.h $(sam_opts_h) $(bedidx_h)
-bam_fastq.o: bam_fastq.c config.h $(htslib_sam_h) $(htslib_kstring_h) $(htslib_klist_h) $(htslib_thread_pool_h) $(htslib_bgzf_h)
+bam_fastq.o: bam_fastq.c config.h iscygpty.h $(htslib_sam_h) $(htslib_kstring_h) $(htslib_klist_h) $(htslib_thread_pool_h) $(htslib_bgzf_h)
 sample.o: sample.c config.h $(sample_h) $(htslib_khash_h)
 stats_isize.o: stats_isize.c config.h $(stats_isize_h) $(htslib_khash_h)
 stats.o: stats.c config.h $(htslib_faidx_h) $(htslib_sam_h) $(htslib_hts_h) $(htslib_hts_defs_h) sam_header.h $(htslib_khash_str2int_h) samtools.h $(htslib_khash_h) $(htslib_kstring_h) $(stats_isize_h) $(sam_opts_h) $(bedidx_h)
 bam_markdup.o: bam_markdup.c config.h $(htslib_thread_pool_h) $(htslib_sam_h) $(sam_opts_h) samtools.h $(htslib_khash_h) $(htslib_klist_h) $(htslib_kstring_h) $(tmp_file_h)
 tmp_file.o: tmp_file.c config.h $(tmp_file_h) $(htslib_sam_h)
+iscygpty.o: iscygpty.c
 
 
 # test programs
