@@ -28,7 +28,7 @@ DEALINGS IN THE SOFTWARE
 #ifndef _TMP_SAM_FILE_H_
 #define _TMP_SAM_FILE_H_
 
-#include <lz4.h>
+#include <lz4hc.h>
 #include "htslib/sam.h"
 
 #ifdef _cplusplus
@@ -51,7 +51,7 @@ extern "C" {
 
 typedef struct {
     FILE *fp;
-    LZ4_stream_t *stream;
+    LZ4_streamHC_t *stream;
     LZ4_streamDecode_t *dstream;
     size_t data_size;
     size_t max_data_size;

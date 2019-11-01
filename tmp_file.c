@@ -40,7 +40,6 @@ DEALINGS IN THE SOFTWARE
 #endif /* _WIN32 */
 
 #include "tmp_file.h"
-#include "htslib/sam.h"
 
 
 static void tmp_print_error(tmp_file_t *tmp, const char *fmt, ...) {
@@ -55,7 +54,7 @@ static void tmp_print_error(tmp_file_t *tmp, const char *fmt, ...) {
 
 
 static int tmp_file_init(tmp_file_t *tmp, int verbose) {
-    tmp->stream       = LZ4_createStream();
+    tmp->stream       = LZ4_createStreamHC();
     tmp->data_size    = 0;
     tmp->group_size   = TMP_SAM_GROUP_SIZE;
     tmp->input_size   = 0;
@@ -137,7 +136,7 @@ int tmp_file_open_write(tmp_file_t *tmp, char *tmp_name, int verbose) {
     }
 
     #ifndef _WIN32
-    unlink(tmp->name); // should auto delete when closed on linux
+    unlink(tmp->name); // should auto delete when closed on Windows
     #endif
 
     return TMP_SAM_OK;
@@ -165,7 +164,7 @@ static int tmp_file_grow_ring_buffer(tmp_file_t *tmp, size_t new_size) {
             }
         }
 
-        if (LZ4_saveDict(tmp->stream, tmp->dict, dict_size) == 0) {
+        if (LZ4_saveDictHC(tmp->stream, tmp->dict, dict_size) == 0) {
             tmp_print_error(tmp, "[tmp_file] Error: unable to save compression dictionary.\n");
             return TMP_SAM_LZ4_ERROR;
         }
@@ -210,8 +209,8 @@ static int tmp_file_write_to_file(tmp_file_t *tmp) {
 
     tmp->ring_index = tmp->ring_buffer + tmp->offset;
 
-    comp_size = LZ4_compress_fast_continue(tmp->stream, (const char *)tmp->ring_index,
-                   tmp->comp_buffer, tmp->input_size, tmp->comp_buffer_size, 1);
+    comp_size = LZ4_compress_HC_continue(tmp->stream, (const char *)tmp->ring_index,
+                   tmp->comp_buffer, tmp->input_size, tmp->comp_buffer_size);
 
     if (comp_size == 0) {
         tmp_print_error(tmp, "[tmp_file] Error: compression failed.\n");
@@ -304,7 +303,7 @@ int tmp_file_end_write(tmp_file_t *tmp) {
 
     fflush(tmp->fp);
 
-    LZ4_freeStream(tmp->stream);
+    LZ4_freeStreamHC(tmp->stream);
 
     return TMP_SAM_OK;
 }
